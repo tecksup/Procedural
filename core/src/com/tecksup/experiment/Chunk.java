@@ -11,7 +11,12 @@ public class Chunk {
     int worldPositionX;
     int worldPositionY;
 
+    int xID;
+    int yID;
+
     public Chunk(int size, int xPos, int yPos, SimplexNoise landNoise, SimplexNoise secondNoise) {
+        this.xID = xPos;
+        this.yID = yPos;
         this.worldPositionX = xPos * size;
         this.worldPositionY = yPos * size;
         landMap = new float[size][size];

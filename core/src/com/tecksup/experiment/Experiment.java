@@ -11,7 +11,6 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.ScreenUtils;
 
 import java.util.HashMap;
@@ -24,6 +23,7 @@ public class Experiment extends ApplicationAdapter {
 	SimplexNoise landNoise;
 	SimplexNoise secondNoise;
 
+	//Pixel/Tile scale
 	int scale = 16;
 
 	int chunkSize = 64;
@@ -32,82 +32,100 @@ public class Experiment extends ApplicationAdapter {
 
 	OrthographicCamera camera;
 	OrthographicCamera guiCamera;
+	
+	int focusPosX = 1;
+	int focusPosY = 1;
+
+	//Debug Metrics
+	int totalChunksOnScreen = 0;
+	int pixelsCulled = 0;
 
 	@Override
-	public void create () {
+	public void create() {
 		Gdx.graphics.setVSync(false);
-		camera = new OrthographicCamera();
-		camera.setToOrtho(false, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-		guiCamera = new OrthographicCamera();
-		guiCamera.setToOrtho(false, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+
+		//Resize gets ran on startup, this sets up cameras
+		//This is fine as long as we don't reference them during the create method
+
 		batch = new SpriteBatch();
+
 		font = new BitmapFont(Gdx.files.internal("Fonts/PixPrompt.fnt"), new TextureRegion(new Texture(Gdx.files.internal("Fonts/PixPrompt.png"))));
 		font.getData().markupEnabled = true;
 		img = new Texture("white-pixel.png");
 
+		//Generate the noise layers
 		landNoise = new SimplexNoise(128, .58f, 2352345);
 		secondNoise = new SimplexNoise(64, .5f, 2345);
 	}
 
 	@Override
-	public void render () {
-		ScreenUtils.clear(1, 0, 0, 1);
-		camera.update();
+	public void render() {
+		ScreenUtils.clear(0.1f, 0.2f, 0.18f, 1);
+		updateCamera();
 		batch.setProjectionMatrix(camera.combined);
 		batch.begin();
 
-		if (false) {
+		//We need to add chunk culling, delete chunks that are not visible to camera
+		if (true) {
 			//We need to start x,y from the bottom left of the screen
-			for (int x = 0; x < camera.viewportWidth/scale; x++) {
-				for (int y = 0; y < camera.viewportHeight/scale; y++) {
-					//0,0 is the pixel on bottom left of screen, we need to map it to world pos
-					Vector3 screenPos = new Vector3(x,y,0);
-					camera.unproject(screenPos);
-					int worldX = MathUtils.floor(screenPos.x);
-					int worldY = MathUtils.floor(screenPos.y);
+			Chunk bottomLeft = getChunkAtPos(focusPosX - MathUtils.floor(camera.viewportWidth)/2, focusPosY - MathUtils.floor(camera.viewportHeight)/2);
+			Chunk topRight = getChunkAtPos(focusPosX + MathUtils.floor(camera.viewportWidth)/2, focusPosY + MathUtils.floor(camera.viewportHeight)/2);
 
-					//With this, we just need to make sure there are no negatives
-					if (worldX < 0 || worldY < 0)
-						break;
+			totalChunksOnScreen = 0;
+			for (int chunkX = bottomLeft.xID; chunkX <= topRight.xID; chunkX++) {
+				for (int chunkY = bottomLeft.yID; chunkY <= topRight.yID; chunkY++) {
+					totalChunksOnScreen++;
+					Chunk currentChunk = getChunkFromID(chunkX, chunkY);
 
-					Chunk temp = getLandValueFromChunks(worldX, worldY);
-					int chunkMapX = worldX % chunkSize;
-					int chunkMapY = worldY % chunkSize;
+					//We need to get a list of the chunks that should be on screen
+					for (int x = 0; x < chunkSize; x++) {
+						for (int y = 0; y < chunkSize; y++) {
+							float landVal = currentChunk.landMap[x][y];
+							float secondVal = currentChunk.secondMap[x][y];
 
-					float landVal = temp.landMap[chunkMapX][chunkMapY];
-					float secondVal = temp.secondMap[chunkMapX][chunkMapY];
-
-					drawPixel(x, y, landVal, secondVal);
+							drawPixel(chunkX*chunkSize + x, chunkY*chunkSize + y, landVal, secondVal);
+						}
+					}
 				}
 			}
-		} else {
-			//We need to add chunk culling, delete chunks that are not visible to camera
-			for (int x = 0; x < 4*chunkSize; x++) {
-				for (int y = 0; y < 4*chunkSize; y++) {
-					Chunk temp = getLandValueFromChunks(x, y);
+		} else { //Renders only the chunk the focus point is in
+			Chunk temp = getChunkAtPos(focusPosX, focusPosY);
+
+			for (int x = 0; x < chunkSize; x++) {
+				for (int y = 0; y < chunkSize; y++) {
 
 					float landVal = temp.landMap[x % chunkSize][y % chunkSize];
 					float secondVal = temp.secondMap[x % chunkSize][y % chunkSize];
 
-					drawPixel(x, y, landVal, secondVal);
+					drawPixel(temp.xID*chunkSize + x, temp.yID*chunkSize + y, landVal, secondVal);
 				}
 			}
 		}
 
+		batch.setColor(Color.BLACK);
+		batch.draw(img, focusPosX, focusPosY, 8, 8);
+
+		drawDebug();
+
+		batch.end();
+		pixelsCulled = 0;
+
+		handleInput();
+	}
+
+	private void drawDebug() {
 		batch.setProjectionMatrix(guiCamera.combined);
 		font.setColor(Color.BLACK);
-		font.draw(batch, Gdx.graphics.getFramesPerSecond() + "", 0, Gdx.graphics.getHeight());
-		font.draw(batch, "Pixels culled " + pixelsCulled, 0, Gdx.graphics.getHeight()-16);
-		font.draw(batch, "Total Chunks " + chunkCount, 0, Gdx.graphics.getHeight()-32);
-
-		Vector3 camCornerPos = new Vector3(camera.position.x - (camera.viewportWidth/2), camera.position.y - (camera.viewportHeight/2), 0);
-		System.out.println("Camera Pos " + camCornerPos);
-		camera.unproject(camCornerPos);
-		System.out.println("Camera Pos unprojected " + camCornerPos);
-		System.out.println("---");
-		font.draw(batch, "(" + ((int) camCornerPos.x / scale) + "," + ((int) camCornerPos.y / scale) + ")", 0, Gdx.graphics.getHeight()-48);
+		font.draw(batch, "FPS: " + Gdx.graphics.getFramesPerSecond(), 0, Gdx.graphics.getHeight());
+		font.draw(batch, "Pixels culled: " + pixelsCulled, 0, Gdx.graphics.getHeight()-16);
+		font.draw(batch, "Chunks visible: " + totalChunksOnScreen, 0, Gdx.graphics.getHeight()-32);
+		font.draw(batch, "Total Chunks: " + chunkCount, 0, Gdx.graphics.getHeight()-48);
 
 
+		Chunk temp = getChunkAtPos(focusPosX, focusPosY);
+		font.draw(batch, "Chunk (" + temp.xID + "," + temp.yID + ")", 0, Gdx.graphics.getHeight()-64);
+
+		//Code block to display pixel at cursor position
 		Vector3 cursorPosInWorld = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
 		camera.unproject(cursorPosInWorld);
 		Vector3 cursorPosOnScreen = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
@@ -115,28 +133,8 @@ public class Experiment extends ApplicationAdapter {
 		font.draw(batch, "(" + ((int) cursorPosInWorld.x / scale) + "," + ((int) cursorPosInWorld.y / scale) + ")", cursorPosOnScreen.x + 16, cursorPosOnScreen.y+16);
 
 		font.setColor(Color.WHITE);
-		batch.end();
-		pixelsCulled = 0;
-
-		handleInput();
 	}
 
-	public Chunk getLandValueFromChunks(int x, int y) {
-		int chunkX = x / chunkSize;
-		int chunkY = y / chunkSize;
-
-		if (!chunks.containsKey(chunkX)) {
-			chunks.put(chunkX, new HashMap<Integer, Chunk>());
-		}
-		if (!chunks.get(chunkX).containsKey(chunkY)) {
-			chunks.get(chunkX).put(chunkY, new Chunk(chunkSize, chunkX, chunkY, landNoise, secondNoise));
-			chunkCount++;
-		}
-
-		return chunks.get(chunkX).get(chunkY);
-	}
-
-	int pixelsCulled = 0;
 	private void drawPixel(int x, int y, float landVal, float secondVal) {
 		//Cull pixels not in view
 		if (camera.frustum.boundsInFrustum(x*scale,y*scale,0,scale,scale,0)) {
@@ -162,31 +160,59 @@ public class Experiment extends ApplicationAdapter {
 	}
 
 	public void handleInput() {
-		if (Gdx.input.isKeyPressed(Input.Keys.W))
-			camera.position.y++;
-		if (Gdx.input.isKeyPressed(Input.Keys.S))
-			camera.position.y--;
-		if (Gdx.input.isKeyPressed(Input.Keys.A))
-			camera.position.x--;
-		if (Gdx.input.isKeyPressed(Input.Keys.D))
-			camera.position.x++;
+		if (Gdx.input.isKeyPressed(Input.Keys.W) || Gdx.input.isKeyPressed(Input.Keys.UP))
+			focusPosY++;
+		if (Gdx.input.isKeyPressed(Input.Keys.S) || Gdx.input.isKeyPressed(Input.Keys.DOWN))
+			focusPosY--;
+		if (Gdx.input.isKeyPressed(Input.Keys.A) || Gdx.input.isKeyPressed(Input.Keys.LEFT))
+			focusPosX--;
+		if (Gdx.input.isKeyPressed(Input.Keys.D) || Gdx.input.isKeyPressed(Input.Keys.RIGHT))
+			focusPosX++;
 	}
 
-	Vector3 camPosCache = new Vector3();
+	public Chunk getChunkFromID(int x, int y) {
+		if (!chunks.containsKey(x)) {
+			chunks.put(x, new HashMap<Integer, Chunk>());
+		}
+		if (!chunks.get(x).containsKey(y)) {
+			chunks.get(x).put(y, new Chunk(chunkSize, x, y, landNoise, secondNoise));
+			chunkCount++;
+		}
+
+		return chunks.get(x).get(y);
+	}
+
+	public Chunk getChunkAtPos(int x, int y) {
+		int chunkX = getChunkID(x, y)[0];
+		int chunkY = getChunkID(x, y)[1];
+
+		return getChunkFromID(chunkX, chunkY);
+	}
+
+	public int[] getChunkID(int x, int y) {
+		return new int[] {((x / scale)/chunkSize - (x <= 0? 1: 0)), ((y / scale)/chunkSize - (y <= 0? 1: 0))};
+	}
+
+	public void updateCamera() {
+		camera.position.set(focusPosX, focusPosY, 0);
+		camera.update();
+	}
+
 	@Override
 	public void resize(int width, int height) {
 		System.out.println("Resized to " + width + " " + height);
-		camPosCache.set(camera.position);
 		camera = new OrthographicCamera();
 		camera.setToOrtho(false, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-		camera.position.set(camPosCache);
 		guiCamera = new OrthographicCamera();
 		guiCamera.setToOrtho(false, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+
+		updateCamera();
 	}
 
 	@Override
-	public void dispose () {
+	public void dispose() {
 		batch.dispose();
 		img.dispose();
+		font.dispose();
 	}
 }
