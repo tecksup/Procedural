@@ -13,22 +13,15 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 
-import java.util.HashMap;
-
 public class Experiment extends ApplicationAdapter {
 	SpriteBatch batch;
 	BitmapFont font;
 	Texture img;
 
-	SimplexNoise landNoise;
-	SimplexNoise secondNoise;
+	World world;
 
 	//Pixel/Tile scale
 	int scale = 16;
-
-	int chunkSize = 64;
-	int chunkCount = 0;
-	HashMap<Integer, HashMap<Integer, Chunk>> chunks = new HashMap<>();
 
 	OrthographicCamera camera;
 	OrthographicCamera guiCamera;
@@ -54,8 +47,7 @@ public class Experiment extends ApplicationAdapter {
 		img = new Texture("white-pixel.png");
 
 		//Generate the noise layers
-		landNoise = new SimplexNoise(128, .58f, 2352345);
-		secondNoise = new SimplexNoise(64, .5f, 2345);
+		world = new World();
 	}
 
 	@Override
@@ -72,34 +64,17 @@ public class Experiment extends ApplicationAdapter {
 			Chunk topRight = getChunkAtPos(focusPosX + MathUtils.floor(camera.viewportWidth)/2, focusPosY + MathUtils.floor(camera.viewportHeight)/2);
 
 			totalChunksOnScreen = 0;
-			for (int chunkX = bottomLeft.xID; chunkX <= topRight.xID; chunkX++) {
-				for (int chunkY = bottomLeft.yID; chunkY <= topRight.yID; chunkY++) {
+			for (int chunkX = bottomLeft.getChunkIDx(); chunkX <= topRight.getChunkIDx(); chunkX++) {
+				for (int chunkY = bottomLeft.getChunkIDy(); chunkY <= topRight.getChunkIDy(); chunkY++) {
 					totalChunksOnScreen++;
-					Chunk currentChunk = getChunkFromID(chunkX, chunkY);
 
-					//We need to get a list of the chunks that should be on screen
-					for (int x = 0; x < chunkSize; x++) {
-						for (int y = 0; y < chunkSize; y++) {
-							float landVal = currentChunk.landMap[x][y];
-							float secondVal = currentChunk.secondMap[x][y];
-
-							drawPixel(chunkX*chunkSize + x, chunkY*chunkSize + y, landVal, secondVal);
-						}
-					}
+					drawChunk(world.getChunkFromID(chunkX, chunkY));
 				}
 			}
 		} else { //Renders only the chunk the focus point is in
-			Chunk temp = getChunkAtPos(focusPosX, focusPosY);
+			totalChunksOnScreen = 1;
 
-			for (int x = 0; x < chunkSize; x++) {
-				for (int y = 0; y < chunkSize; y++) {
-
-					float landVal = temp.landMap[x % chunkSize][y % chunkSize];
-					float secondVal = temp.secondMap[x % chunkSize][y % chunkSize];
-
-					drawPixel(temp.xID*chunkSize + x, temp.yID*chunkSize + y, landVal, secondVal);
-				}
-			}
+			drawChunk(getChunkAtPos(focusPosX, focusPosY));
 		}
 
 		batch.setColor(Color.BLACK);
@@ -117,13 +92,13 @@ public class Experiment extends ApplicationAdapter {
 		batch.setProjectionMatrix(guiCamera.combined);
 		font.setColor(Color.BLACK);
 		font.draw(batch, "FPS: " + Gdx.graphics.getFramesPerSecond(), 0, Gdx.graphics.getHeight());
-		font.draw(batch, "Pixels culled: " + pixelsCulled, 0, Gdx.graphics.getHeight()-16);
-		font.draw(batch, "Chunks visible: " + totalChunksOnScreen, 0, Gdx.graphics.getHeight()-32);
-		font.draw(batch, "Total Chunks: " + chunkCount, 0, Gdx.graphics.getHeight()-48);
-
+		font.draw(batch, "SEED: " + world.getSeed(), 0, Gdx.graphics.getHeight()-16);
+		font.draw(batch, "Pixels culled: " + pixelsCulled, 0, Gdx.graphics.getHeight()-32);
+		font.draw(batch, "Chunks visible: " + totalChunksOnScreen, 0, Gdx.graphics.getHeight()-48);
+		font.draw(batch, "Total Chunks: " + world.getChunkCount(), 0, Gdx.graphics.getHeight()-64);
 
 		Chunk temp = getChunkAtPos(focusPosX, focusPosY);
-		font.draw(batch, "Chunk (" + temp.xID + "," + temp.yID + ")", 0, Gdx.graphics.getHeight()-64);
+		font.draw(batch, "Chunk (" + temp.getChunkIDx() + "," + temp.getChunkIDy() + ")", 0, Gdx.graphics.getHeight()-80);
 
 		//Code block to display pixel at cursor position
 		Vector3 cursorPosInWorld = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
@@ -135,22 +110,18 @@ public class Experiment extends ApplicationAdapter {
 		font.setColor(Color.WHITE);
 	}
 
-	private void drawPixel(int x, int y, float landVal, float secondVal) {
+	private void drawChunk(Chunk chunk) {
+		for (int x = 0; x < world.getChunkSize(); x++) {
+			for (int y = 0; y < world.getChunkSize(); y++) {
+				drawPixel(chunk.getChunkIDx()*world.getChunkSize() + x, chunk.getChunkIDy()*world.getChunkSize() + y, chunk.getColorMap()[x % world.getChunkSize()][y % world.getChunkSize()]);
+			}
+		}
+	}
+
+	private void drawPixel(int x, int y, Color color) {
 		//Cull pixels not in view
 		if (camera.frustum.boundsInFrustum(x*scale,y*scale,0,scale,scale,0)) {
-			if (landVal > 0.5) { //Water
-				batch.setColor(landVal * (landVal * -1), landVal * (landVal * -1), landVal, 1);
-			} else { //Land
-				if (landVal > 0.46) //Sand
-					batch.setColor(1f, 1f, landVal, 1);
-				else {
-					if (secondVal > 0.5f) {
-						batch.setColor(landVal * secondVal, landVal / secondVal, landVal * secondVal, 1);
-					} else {
-						batch.setColor(landVal, landVal / secondVal, landVal, 1);
-					}
-				}
-			}
+			batch.setColor(color);
 
 			//Draw Pixel
 			batch.draw(img, x*scale, y*scale, scale, scale);
@@ -170,27 +141,15 @@ public class Experiment extends ApplicationAdapter {
 			focusPosX++;
 	}
 
-	public Chunk getChunkFromID(int x, int y) {
-		if (!chunks.containsKey(x)) {
-			chunks.put(x, new HashMap<Integer, Chunk>());
-		}
-		if (!chunks.get(x).containsKey(y)) {
-			chunks.get(x).put(y, new Chunk(chunkSize, x, y, landNoise, secondNoise));
-			chunkCount++;
-		}
-
-		return chunks.get(x).get(y);
-	}
-
 	public Chunk getChunkAtPos(int x, int y) {
 		int chunkX = getChunkID(x, y)[0];
 		int chunkY = getChunkID(x, y)[1];
 
-		return getChunkFromID(chunkX, chunkY);
+		return world.getChunkFromID(chunkX, chunkY);
 	}
 
 	public int[] getChunkID(int x, int y) {
-		return new int[] {((x / scale)/chunkSize - (x <= 0? 1: 0)), ((y / scale)/chunkSize - (y <= 0? 1: 0))};
+		return new int[] {((x / scale)/world.getChunkSize() - (x <= 0? 1: 0)), ((y / scale)/world.getChunkSize() - (y <= 0? 1: 0))};
 	}
 
 	public void updateCamera() {
