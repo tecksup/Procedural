@@ -41,7 +41,7 @@ project(":desktop") {
         implementation project(":core")
         api "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
         api "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
-        
+
     }
 }
 
@@ -49,5 +49,10 @@ project(":core") {
     apply plugin: "java-library"
     dependencies {
         api "com.badlogicgames.gdx:gdx:$gdxVersion"
+        api "com.google.code.gson:gson:$gsonVersion"
+
+        api ("com.badlogicgames.gdx:gdx-tools:$gdxVersion") {
+            exclude group: 'com.badlogicgames.gdx', module: 'gdx-backend-lwjgl'
+        }
     }
 }

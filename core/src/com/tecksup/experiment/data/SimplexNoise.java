@@ -1,4 +1,4 @@
-package com.tecksup.experiment;
+package com.tecksup.experiment.data;
 
 import java.util.Random;
 
